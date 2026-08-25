@@ -15,6 +15,24 @@ local usingSpritesheet = false
 local heartSprite
 local cardSound
 local crtShader
+local sfxVolume = 1.0
+local musicVolume = 1.0
+local gameOver = false
+local gameWon = false
+local youWinSprite
+local gameOverSprite
+local oldLondonFont
+local oldLondonMedFont
+local gothikSteelFont
+local FiftiesMoviesFont
+local xSprite
+local plusSprite
+local startVideo
+local videoPlaying = false
+local videoFailed = false
+local canUseFish = true
+local wallpapers = {}
+local currentWallpaperIndex = 1
 
 local canvas
 local largeFont
@@ -43,19 +61,15 @@ local deck = {
     },
 }
 
-local btnStart = {
-    x = screenWidth / 2 - 60,
-    y = screenHeight / 2 - 25,
-    width = 120,
-    height = 50,
-    text = "START"
-}
+
 
 local trashSprite
+local runSprite
+local bgSprite
 
 local btnTrash = {
-    x = screenWidth / 2 + 250,
-    y = screenHeight / 2 - 40,
+    x = 20,
+    y = 40,
     width = 80,
     height = 80,
     text = "X"
@@ -63,13 +77,12 @@ local btnTrash = {
 
 local btnRun = {
     x = 20,
-    y = 20,
-    width = 100,
-    height = 40,
+    y = screenHeight / 2 - 140,
+    width = 80,
+    height = 80,
     text = "RUN"
 }
 
-local runCooldown = 0
 local currentDifficulty = "Medium"
 local showSettings = false
 local settingsSprite
@@ -100,6 +113,7 @@ local cardTypes = {
 
 local playerHP = 20
 local maxHP = 20
+local playerShield = 0
 local healedThisTurn = false
 
 local slots = {}
@@ -184,8 +198,13 @@ local function new_card(color, cardType, suit_idx, rank)
     }
 end
 
-local function queue_sound(sound, delay, pitch)
-    table.insert(sounds, { sound = sound, delay = delay, pitch = pitch })
+local function queue_sound(soundSrc, delay, pitch)
+    local snd = soundSrc
+    if type(soundSrc) == "table" then
+        snd = soundSrc[math.random(#soundSrc)]
+    end
+    snd:setVolume(sfxVolume)
+    table.insert(sounds, { sound = snd, delay = delay, pitch = pitch })
 end
 
 local function get_dealt_cards()
@@ -249,34 +268,158 @@ end
 
 local function refill_session_if_needed()
     local dealtCount = #get_dealt_cards()
+
+    if dealtCount == 0 and #deck.cards == 0 then
+        gameWon = true
+        return
+    end
+
     if dealtCount == 1 then
         deal_new_cards(3)
+        healedThisTurn = false
+        canUseFish = true
     elseif dealtCount == 0 then
         deal_new_cards(4)
+        healedThisTurn = false
+        canUseFish = true
     end
 end
 
+local function reset_match()
+    playerHP = 20
+    playerShield = 0
+    gameOver = false
+    gameWon = false
+    canUseFish = true
+    healedThisTurn = false
+    weaponKills = {}
+
+    for _, slot in ipairs(slots) do slot.card = nil end
+    if powerSlot then powerSlot.card = nil end
+    if weaponSlot then weaponSlot.card = nil end
+
+    cards = {}
+    deck.cards = {}
+
+    local deckBuilder = {}
+    local suits = { "Spades", "Clubs", "Hearts", "Diamonds" }
+    local suitToRow = { Hearts = 1, Spades = 2, Diamonds = 3, Clubs = 4 }
+
+    for _, suit in ipairs(suits) do
+        for rank = 1, 13 do
+            local cardType
+            local color
+            local powerType = nil
+            local powerTarget = nil
+            local powerAmount = nil
+            local itemType = nil
+            local shieldTarget = nil
+
+            if suit == "Spades" or suit == "Clubs" then
+                cardType = "enemy"
+                color = cardColors[4] -- Black
+            else
+                -- Hearts (Red) or Diamonds (Yellow)
+                color = suit == "Diamonds" and cardColors[2] or cardColors[3]
+
+                if rank == 13 then
+                    cardType = "item"
+                    itemType = suit == "Diamonds" and "kill" or "poison"
+                elseif rank == 10 then
+                    cardType = "shield"
+                    shieldTarget = suit == "Diamonds" and "weapon" or "health"
+                elseif rank == 11 then
+                    cardType = "power"
+                    powerType = "add"
+                    powerAmount = 2
+                    powerTarget = suit == "Diamonds" and "weapon" or "potion"
+                elseif rank == 12 then
+                    cardType = "power"
+                    powerType = "double"
+                    powerAmount = 1
+                    powerTarget = suit == "Diamonds" and "weapon" or "potion"
+                else
+                    -- Ranks 1 to 9 (Cards 2 to 10)
+                    cardType = suit == "Diamonds" and "weapon" or "potion"
+                end
+            end
+
+            local card = new_card(color, cardType, suitToRow[suit], rank)
+            card.value = rank + 1
+            card.power_type = powerType
+            card.power_target = powerTarget
+            card.item_type = itemType
+            card.shield_target = shieldTarget
+            if powerAmount then card.power_amount = powerAmount end
+            table.insert(deckBuilder, card)
+        end
+    end
+
+    math.randomseed(os.time())
+    for i = #deckBuilder, 2, -1 do
+        local j = math.random(i)
+        deckBuilder[i], deckBuilder[j] = deckBuilder[j], deckBuilder[i]
+    end
+
+    for _, card in ipairs(deckBuilder) do
+        table.insert(cards, card)
+        table.insert(deck.cards, card)
+    end
+
+    deal_new_cards(4)
+end
+
 local function effective_value(card)
-    return card.value * (card.power_mult or 1)
+    return card.value
+end
+
+local function take_damage(amount)
+    if playerShield > 0 then
+        if playerShield >= amount then
+            playerShield = playerShield - amount
+            amount = 0
+        else
+            amount = amount - playerShield
+            playerShield = 0
+        end
+    end
+    if amount > 0 then
+        playerHP = math.max(0, playerHP - amount)
+        if playerHP <= 0 then
+            gameOver = true
+        end
+    end
 end
 
 local function kill_enemy_with_fists(enemy)
-    playerHP = math.max(0, playerHP - enemy.value)
+    take_damage(enemy.value)
     enemy.is_discarded = true
     enemy.is_dealt = false
     enemy.anim.punch = -0.2
-    queue_sound(cardSound, 0, 0.8)
+    queue_sound(impactSounds, 0, 0.8)
 end
 
 local function kill_enemy_with_weapon(weapon, enemy)
     if weapon.last_killed_value and enemy.value > weapon.last_killed_value then
-        queue_sound(cardSound, 0, 0.5)
+        queue_sound(dealSounds, 0, 0.5)
         return false
     end
 
     local effective = effective_value(weapon)
     if effective < enemy.value then
-        playerHP = math.max(0, playerHP - (enemy.value - effective))
+        local leftover = enemy.value - effective
+        if weapon.weapon_shield and weapon.weapon_shield > 0 then
+            if weapon.weapon_shield >= leftover then
+                weapon.weapon_shield = weapon.weapon_shield - leftover
+                leftover = 0
+            else
+                leftover = leftover - weapon.weapon_shield
+                weapon.weapon_shield = 0
+            end
+        end
+        if leftover > 0 then
+            take_damage(leftover)
+        end
     end
 
     weapon.last_killed_value = enemy.value
@@ -308,7 +451,7 @@ local function kill_enemy_with_weapon(weapon, enemy)
     table.insert(cards, weapon)
 
     weapon.is_selected = false
-    queue_sound(cardSound, 0, 0.8)
+    queue_sound(impactSounds, 0, 0.8)
     return true
 end
 
@@ -344,7 +487,9 @@ local function open_enemy_popup(enemy)
 end
 
 function love.load()
-    local success, img = pcall(love.graphics.newImage, "spritesheet.png")
+    youWinSprite = love.graphics.newImage("assets/youwin.jpg")
+    gameOverSprite = love.graphics.newImage("assets/gameover.jpg")
+    local success, img = pcall(love.graphics.newImage, "assets/spritesheet.png")
     if success then
         usingSpritesheet = true
         cardSpritesheet = img
@@ -370,34 +515,114 @@ function love.load()
         end
         cardBackQuad = cardQuads[1][14]
     else
-        cardSprite = love.graphics.newImage("card.png")
+        cardSprite = love.graphics.newImage("assets/card.png")
     end
 
-    local successSettings, sImg = pcall(love.graphics.newImage, "settings.jpg")
+    local successSettings, sImg = pcall(love.graphics.newImage, "assets/settings.png")
     if successSettings then
         settingsSprite = sImg
         settingsSprite:setFilter("nearest", "nearest")
     end
 
-    local successTrash, tImg = pcall(love.graphics.newImage, "trash.jpg")
+    local successTrash, tImg = pcall(love.graphics.newImage, "assets/trash.png")
     if successTrash then
         trashSprite = tImg
         trashSprite:setFilter("nearest", "nearest")
     end
 
-    cardSound = love.audio.newSource("card.ogg", "static")
+    local successX, xImg = pcall(love.graphics.newImage, "assets/x.png")
+    if successX then
+        xSprite = xImg
+        xSprite:setFilter("nearest", "nearest")
+    end
+
+    local successPlus, pImg = pcall(love.graphics.newImage, "assets/+.png")
+    if successPlus then
+        plusSprite = pImg
+        plusSprite:setFilter("nearest", "nearest")
+    end
+
+    local successRun, rImg = pcall(love.graphics.newImage, "assets/fish.png")
+    if successRun then
+        runSprite = rImg
+        runSprite:setFilter("nearest", "nearest")
+    end
+
+    local possible_bgs = {
+        "assets/wallpaper.jpg",
+        "assets/wallpaper1.jpg",
+        "assets/wallpaper2.png",
+        "assets/wallpaper3.jpg",
+        "assets/wallpaper4.jpg",
+        "assets/wallpaper5.jpg",
+        "assets/wallpaper6.jpg",
+        "assets/wallpaper7.jpg",
+        "assets/wallpaper8.jpg"
+    }
+    for _, fname in ipairs(possible_bgs) do
+        local successBg, bImg = pcall(love.graphics.newImage, fname)
+        if successBg then
+            bImg:setFilter("nearest", "nearest")
+            table.insert(wallpapers, bImg)
+        end
+    end
+    if #wallpapers > 0 then
+        bgSprite = wallpapers[1]
+        currentWallpaperIndex = 1
+    end
+
+
+    dealSounds = {
+        love.audio.newSource("Stereo/ogg/JDSherbert - Tabletop Games SFX Pack - Deck Deal - 1.ogg", "static"),
+        love.audio.newSource("Stereo/ogg/JDSherbert - Tabletop Games SFX Pack - Deck Deal - 2.ogg", "static")
+    }
+
+    local successVid, vid = pcall(love.graphics.newVideo, "start.ogv")
+    if successVid then
+        startVideo = vid
+        startVideo:play()
+        videoPlaying = true
+    else
+        videoPlaying = false
+        videoFailed = true
+    end
+    shuffleSounds = {
+        love.audio.newSource("Stereo/ogg/JDSherbert - Tabletop Games SFX Pack - Deck Shuffle - 1.ogg", "static"),
+        love.audio.newSource("Stereo/ogg/JDSherbert - Tabletop Games SFX Pack - Deck Shuffle - 2.ogg", "static")
+    }
+    moveSounds = {
+        love.audio.newSource("Stereo/ogg/JDSherbert - Tabletop Games SFX Pack - Piece Move - 1.ogg", "static"),
+        love.audio.newSource("Stereo/ogg/JDSherbert - Tabletop Games SFX Pack - Piece Move - 2.ogg", "static")
+    }
+    impactSounds = {
+        love.audio.newSource("Stereo/ogg/JDSherbert - Tabletop Games SFX Pack - Piece Impact - 1.ogg", "static"),
+        love.audio.newSource("Stereo/ogg/JDSherbert - Tabletop Games SFX Pack - Piece Impact - 2.ogg", "static")
+    }
+    cardSound = dealSounds[1]
     crtShader = love.graphics.newShader("crt.glsl")
     canvas = love.graphics.newCanvas(screenWidth, screenHeight, { type = '2d', readable = true })
     defaultFont = love.graphics.getFont()
     largeFont = love.graphics.newFont(48)
     mediumFont = love.graphics.newFont(24)
 
-    local successFont, fontData = pcall(love.graphics.newFont, "blackflag.ttf", 50)
+    local successFifties, fFont = pcall(love.graphics.newFont, "fonts/Fifties Movies.ttf", 26)
+    if successFifties then FiftiesMoviesFont = fFont else FiftiesMoviesFont = mediumFont end
+
+    local successOld, oldFont = pcall(love.graphics.newFont, "fonts/OldLondon.ttf", 52)
+    if successOld then oldLondonFont = oldFont else oldLondonFont = largeFont end
+
+    local successOldMed, oldFontMed = pcall(love.graphics.newFont, "fonts/OldLondon.ttf", 32)
+    if successOldMed then oldLondonMedFont = oldFontMed else oldLondonMedFont = mediumFont end
+
+    local successGoth, gothFont = pcall(love.graphics.newFont, "fonts/Gothik Steel.ttf", 100)
+    if successGoth then gothikSteelFont = gothFont else gothikSteelFont = largeFont end
+
+    local successFont, fontData = pcall(love.graphics.newFont, "fonts/blackflag.ttf", 50)
     if not successFont then
-        successFont, fontData = pcall(love.graphics.newFont, "BlackFlag.ttf", 50)
+        successFont, fontData = pcall(love.graphics.newFont, "fonts/BlackFlag.ttf", 50)
     end
     if not successFont then
-        successFont, fontData = pcall(love.graphics.newFont, "blackflag.otf", 50)
+        successFont, fontData = pcall(love.graphics.newFont, "fonts/blackflag.otf", 50)
     end
     if successFont then
         hpFont = fontData
@@ -446,31 +671,46 @@ function love.load()
             local color
             local powerType = nil
             local powerTarget = nil
+            local powerAmount = nil
+            local itemType = nil
+            local shieldTarget = nil
+
             if suit == "Spades" or suit == "Clubs" then
                 cardType = "enemy"
                 color = cardColors[4] -- Black
-            elseif rank >= 11 and rank <= 13 then
-                cardType = "power"
-                powerType = "double"
-                if suit == "Diamonds" then
-                    color = cardColors[2] -- Yellow (multiply weapons)
-                    powerTarget = "weapon"
-                else
-                    color = cardColors[3] -- Red (multiply potions)
-                    powerTarget = "potion"
-                end
-            elseif suit == "Hearts" then
-                cardType = "potion"
-                color = cardColors[3] -- Red
             else
-                cardType = "weapon"
-                color = cardColors[1] -- Blue
+                -- Hearts (Red) or Diamonds (Yellow)
+                color = suit == "Diamonds" and cardColors[2] or cardColors[3]
+
+                if rank == 13 then
+                    cardType = "item"
+                    itemType = suit == "Diamonds" and "kill" or "poison"
+                elseif rank == 10 then
+                    cardType = "shield"
+                    shieldTarget = suit == "Diamonds" and "weapon" or "health"
+                elseif rank == 11 then
+                    cardType = "power"
+                    powerType = "add"
+                    powerAmount = 2
+                    powerTarget = suit == "Diamonds" and "weapon" or "potion"
+                elseif rank == 12 then
+                    cardType = "power"
+                    powerType = "double"
+                    powerAmount = 1
+                    powerTarget = suit == "Diamonds" and "weapon" or "potion"
+                else
+                    -- Ranks 1 to 9 (Cards 2 to 10)
+                    cardType = suit == "Diamonds" and "weapon" or "potion"
+                end
             end
 
             local card = new_card(color, cardType, suitToRow[suit], rank)
-            card.value = rank
+            card.value = rank + 1
             card.power_type = powerType
             card.power_target = powerTarget
+            card.item_type = itemType
+            card.shield_target = shieldTarget
+            if powerAmount then card.power_amount = powerAmount end
             table.insert(deckBuilder, card)
         end
     end
@@ -489,12 +729,47 @@ end
 
 function love.draw()
     love.graphics.setCanvas(canvas)
+
+    if videoPlaying and startVideo then
+        local vw, vh = startVideo:getDimensions()
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(startVideo, 0, 0, 0, screenWidth / vw, screenHeight / vh)
+        love.graphics.setCanvas()
+
+        love.graphics.setColor({ 1, 1, 1, 1 })
+        crtShader:send('millis', love.timer.getTime() - startTime)
+        love.graphics.setShader(crtShader)
+        love.graphics.draw(canvas, globalOffsetX, globalOffsetY, 0, globalScaleX, globalScaleY)
+        love.graphics.setShader()
+
+        if tvFrameSprite then
+            love.graphics.setColor(1, 1, 1, 1)
+            local fw, fh = tvFrameSprite:getDimensions()
+            love.graphics.draw(tvFrameSprite, 0, 0, 0, screenWidth / fw, screenHeight / fh)
+        end
+        return
+    end
+
     love.graphics.clear(0.937, 0.945, 0.96, 1)
+
+    if bgSprite then
+        love.graphics.setColor(1, 1, 1, 1)
+        local bw, bh = bgSprite:getDimensions()
+        love.graphics.draw(bgSprite, 0, 0, 0, screenWidth / bw, screenHeight / bh)
+    end
 
     -- Draw HP
     love.graphics.setFont(hpFont)
     love.graphics.setColor(1, 0.3, 0.3, 1)
-    love.graphics.printf(playerHP, 0, 50, screenWidth, "center")
+
+    if playerShield > 0 then
+        love.graphics.printf(playerHP, -80, 50, screenWidth, "center")
+        love.graphics.setColor(0.5, 0.5, 0.5, 1)
+        love.graphics.printf("S: " .. playerShield, 80, 50, screenWidth, "center")
+    else
+        love.graphics.printf(playerHP, 0, 50, screenWidth, "center")
+    end
+
     love.graphics.setFont(defaultFont)
 
     -- Draw Inventory Slots
@@ -517,12 +792,7 @@ function love.draw()
     love.graphics.rectangle("line", weaponSlot.x, weaponSlot.y, weaponSlot.width, weaponSlot.height, 5, 5)
 
     -- Draw START button
-    if #get_dealt_cards() == 0 then
-        love.graphics.setColor(0.1, 0.6, 0.3, 1)
-        love.graphics.rectangle("fill", btnStart.x, btnStart.y, btnStart.width, btnStart.height, 8, 8)
-        love.graphics.setColor(1, 1, 1, 1)
-        love.graphics.printf(btnStart.text, btnStart.x, btnStart.y + 18, btnStart.width, "center")
-    end
+
 
     -- Draw Trash button
     local mx, my = love.mouse.getPosition()
@@ -548,14 +818,27 @@ function love.draw()
     end
 
     -- Draw RUN button
-    if runCooldown == 0 then
-        love.graphics.setColor(0.8, 0.2, 0.2, 1)
+    local mx, my = love.mouse.getPosition()
+    local isRunHover = canUseFish and not showSettings and mx > btnRun.x and mx < btnRun.x + btnRun.width and
+        my > btnRun.y and my < btnRun.y + btnRun.height
+
+    love.graphics.setColor(1, 1, 1, canUseFish and 1 or 0.3)
+    if runSprite then
+        local tw, th = runSprite:getDimensions()
+        local baseScale = 80 / th
+        local scale = isRunHover and (baseScale * 1.15) or baseScale
+        local rot = 0
+        if isRunHover then
+            rot = math.sin(love.timer.getTime() * 6) * 0.15
+        end
+        love.graphics.draw(runSprite, btnRun.x + btnRun.width / 2, btnRun.y + btnRun.height / 2, rot, scale, scale, tw /
+            2, th / 2)
     else
-        love.graphics.setColor(0.4, 0.4, 0.4, 1)
+        love.graphics.setColor(0.8, 0.2, 0.2, 1)
+        love.graphics.rectangle("fill", btnRun.x, btnRun.y, btnRun.width, btnRun.height, 8, 8)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.printf(btnRun.text, btnRun.x, btnRun.y + 24, btnRun.width, "center")
     end
-    love.graphics.rectangle("fill", btnRun.x, btnRun.y, btnRun.width, btnRun.height, 8, 8)
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.printf(btnRun.text, btnRun.x, btnRun.y + 14, btnRun.width, "center")
 
     -- Draw Settings button
     local mx, my = love.mouse.getPosition()
@@ -600,8 +883,11 @@ function love.draw()
             love.graphics.scale(current_scale, current_scale)
 
             local shadow_dist = 4
-            if card.dragging then shadow_dist = 16 end
-            if not card.dragging and card.anim.scale > cardScale then shadow_dist = 10 end
+            if card.dragging then
+                shadow_dist = 16
+            elseif card.anim.scale > cardScale + 0.02 then
+                shadow_dist = 10
+            end
             love.graphics.setColor(0, 0, 0, 0.4 * card.anim.opacity)
             if usingSpritesheet then
                 love.graphics.draw(cardSpritesheet, cardQuads[card.suit_idx][card.rank], 0, shadow_dist, 0, 1, 1,
@@ -625,12 +911,51 @@ function love.draw()
 
             if not usingSpritesheet then
                 love.graphics.setFont(mediumFont)
-                if card.type == "power" then
-                    local label = "x2"
+                if card.type == "item" then
+                    local label = card.item_type == "kill" and "KILL" or "POISON"
+                    love.graphics.setColor(0.1, 0.1, 0.1, card.anim.opacity)
                     love.graphics.printf(label, -63, -16, 126, "center")
                     love.graphics.setFont(defaultFont)
                     love.graphics.printf(label, -55, -82, 126, "left")
+                elseif card.type == "shield" then
+                    local label = "SHIELD 10"
+                    love.graphics.setColor(0.1, 0.1, 0.1, card.anim.opacity)
+                    love.graphics.printf(label, -63, -16, 126, "center")
+                    love.graphics.setFont(defaultFont)
+                    love.graphics.printf(label, -55, -82, 126, "left")
+                elseif card.type == "power" then
+                    if card.power_type == "add" then
+                        local label = tostring(card.power_amount)
+                        if plusSprite then
+                            love.graphics.setColor(1, 1, 1, card.anim.opacity)
+                            local sw, sh = plusSprite:getDimensions()
+                            local scale = 140 / sh
+                            love.graphics.draw(plusSprite, -45, -45, 0, scale, scale)
+                            love.graphics.setColor(0.1, 0.1, 0.1, card.anim.opacity)
+                            love.graphics.setFont(FiftiesMoviesFont)
+                            love.graphics.printf(label, 20, -32, 100, "left")
+                        else
+                            love.graphics.setColor(0.1, 0.1, 0.1, card.anim.opacity)
+                            love.graphics.printf("+" .. label, -63, -16, 126, "center")
+                        end
+                    elseif card.power_type == "double" then
+                        local label = "2"
+                        if xSprite then
+                            love.graphics.setColor(1, 1, 1, card.anim.opacity)
+                            local sw, sh = xSprite:getDimensions()
+                            local scale = 140 / sh
+                            love.graphics.draw(xSprite, -45, -45, 0, scale, scale)
+                            love.graphics.setColor(0.1, 0.1, 0.1, card.anim.opacity)
+                            love.graphics.setFont(FiftiesMoviesFont)
+                            love.graphics.printf(label, 20, -32, 100, "left")
+                        else
+                            love.graphics.setColor(0.1, 0.1, 0.1, card.anim.opacity)
+                            love.graphics.printf("x" .. label, -63, -16, 126, "center")
+                        end
+                    end
+                    love.graphics.setFont(defaultFont)
                 else
+                    love.graphics.setColor(0.1, 0.1, 0.1, card.anim.opacity)
                     love.graphics.printf(tostring(effective_value(card)), -63, -16, 126, "center")
                     love.graphics.setFont(defaultFont)
                     love.graphics.printf(tostring(effective_value(card)), -55, -82, 126, "left")
@@ -646,14 +971,70 @@ function love.draw()
                 love.graphics.printf("Max: " .. tostring(card.last_killed_value), x_offset, offset, text_w, "center")
             end
 
+            local badges = {}
             if card.power_mult and card.power_mult > 0 then
-                love.graphics.setFont(mediumFont)
-                love.graphics.setColor(1, 0.85, 0.2, card.anim.opacity)
-                local badge = "x" .. tostring(card.power_mult)
-                if usingSpritesheet then
-                    love.graphics.printf(badge, -cardSpriteW / 2, -cardSpriteH / 2 - 32, cardSpriteW, "center")
+                local pAmt = card.power_mult
+                local c
+                if pAmt == 1 then
+                    c = { 0.1, 0.1, 0.1 }
+                elseif pAmt == 2 then
+                    c = { 1, 0.85, 0.2 }
+                elseif pAmt == 3 then
+                    c = { 1, 0.2, 0.2 }
                 else
-                    love.graphics.printf(badge, -63, -110, 126, "center")
+                    c = { 0.2, 0.5, 1 }
+                end
+                table.insert(badges, { type = "x", value = tostring(pAmt * 2), color = c })
+            end
+            if card.added_value and card.added_value > 0 then
+                table.insert(badges, { type = "+", value = tostring(card.added_value), color = { 0.1, 0.1, 0.1 } })
+            end
+            if card.weapon_shield and card.weapon_shield > 0 then
+                table.insert(badges,
+                    { type = "text", text = "S:" .. tostring(card.weapon_shield), color = { 0.5, 0.5, 0.5 } })
+            end
+
+            if #badges > 0 then
+                love.graphics.setFont(mediumFont)
+                local start_y = -110
+                for i, badge in ipairs(badges) do
+                    local base_y = usingSpritesheet and (-cardSpriteH / 2 - 32) or start_y
+
+                    local x_shift = 0
+                    local y_shift = 0
+                    if i == 2 then
+                        x_shift = -40
+                        y_shift = 45
+                    elseif i == 3 then
+                        x_shift = 40
+                        y_shift = 45
+                    end
+
+                    local final_y = base_y + y_shift
+
+                    if badge.type == "x" or badge.type == "+" then
+                        local sprite = badge.type == "x" and xSprite or plusSprite
+                        if sprite then
+                            love.graphics.setColor(1, 1, 1, card.anim.opacity)
+                            local sw, sh = sprite:getDimensions()
+                            local scale = 60 / sh
+                            love.graphics.draw(sprite, -38 + x_shift, final_y - 15, 0, scale, scale)
+                            love.graphics.setColor(badge.color[1], badge.color[2], badge.color[3], card.anim.opacity)
+                            love.graphics.setFont(FiftiesMoviesFont)
+                            if i == 2 then
+                                love.graphics.printf(badge.value, -125 + x_shift, final_y - 10, 100, "right")
+                            else
+                                love.graphics.printf(badge.value, 15 + x_shift, final_y - 10, 100, "left")
+                            end
+                            love.graphics.setFont(mediumFont)
+                        else
+                            love.graphics.setColor(badge.color[1], badge.color[2], badge.color[3], card.anim.opacity)
+                            love.graphics.printf(badge.type .. badge.value, -63 + x_shift, final_y, 126, "center")
+                        end
+                    else
+                        love.graphics.setColor(badge.color[1], badge.color[2], badge.color[3], card.anim.opacity)
+                        love.graphics.printf(badge.text, -63 + x_shift, final_y, 126, "center")
+                    end
                 end
                 love.graphics.setFont(defaultFont)
             end
@@ -738,22 +1119,21 @@ function love.draw()
         love.graphics.setColor(0, 0, 0, 0.8)
         love.graphics.rectangle("fill", 0, 0, screenWidth, screenHeight)
 
-        local pw, ph = 400, 300
+        local pw, ph = 400, 460
         local px, py = screenWidth / 2 - pw / 2, screenHeight / 2 - ph / 2
         love.graphics.setColor(0.15, 0.15, 0.18, 1)
         love.graphics.rectangle("fill", px, py, pw, ph, 12, 12)
-
         love.graphics.setColor(1, 1, 1, 1)
-        love.graphics.setFont(largeFont)
-        love.graphics.printf("Settings", px, py + 20, pw, "center")
+        love.graphics.setFont(oldLondonFont)
+        love.graphics.printf("Settings", px, py + 15, pw, "center")
 
-        love.graphics.setFont(mediumFont)
-        love.graphics.printf("Select Difficulty:", px, py + 100, pw, "center")
+        love.graphics.setFont(oldLondonMedFont)
+        love.graphics.printf("Select Difficulty:", px, py + 95, pw, "center")
 
         local difficulties = { "Easy", "Medium", "Hard" }
         for i, diff in ipairs(difficulties) do
             local bx = px + 40 + (i - 1) * 110
-            local by = py + 150
+            local by = py + 140
             if currentDifficulty == diff then
                 love.graphics.setColor(0.2, 0.8, 0.3, 1)
             else
@@ -761,13 +1141,118 @@ function love.draw()
             end
             love.graphics.rectangle("fill", bx, by, 100, 50, 8, 8)
             love.graphics.setColor(1, 1, 1, 1)
-            love.graphics.printf(diff, bx, by + 14, 100, "center")
+            love.graphics.printf(diff, bx, by + 12, 100, "center")
         end
 
-        love.graphics.setColor(0.8, 0.3, 0.3, 1)
-        love.graphics.rectangle("fill", px + pw / 2 - 60, py + 230, 120, 40, 8, 8)
+        -- Draw volume controls
         love.graphics.setColor(1, 1, 1, 1)
-        love.graphics.printf("Close", px + pw / 2 - 60, py + 230 + 8, 120, "center")
+        love.graphics.setFont(oldLondonMedFont)
+        love.graphics.printf("SFX: " .. math.floor(sfxVolume * 100) .. "%", px + 90, py + 215, pw - 180, "center")
+        love.graphics.setColor(0.3, 0.3, 0.35, 1)
+        love.graphics.rectangle("fill", px + 40, py + 210, 40, 40, 5, 5)      -- SFX minus
+        love.graphics.rectangle("fill", px + pw - 80, py + 210, 40, 40, 5, 5) -- SFX plus
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.printf("-", px + 40, py + 215, 40, "center")
+        love.graphics.printf("+", px + pw - 80, py + 215, 40, "center")
+
+        love.graphics.printf("Music: " .. math.floor(musicVolume * 100) .. "%", px + 90, py + 275, pw - 180, "center")
+        love.graphics.setColor(0.3, 0.3, 0.35, 1)
+        love.graphics.rectangle("fill", px + 40, py + 270, 40, 40, 5, 5)      -- Music minus
+        love.graphics.rectangle("fill", px + pw - 80, py + 270, 40, 40, 5, 5) -- Music plus
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.printf("-", px + 40, py + 275, 40, "center")
+        love.graphics.printf("+", px + pw - 80, py + 275, 40, "center")
+
+        -- Draw wallpaper controls
+        love.graphics.printf("Wallpaper: " .. currentWallpaperIndex, px + 90, py + 335, pw - 180, "center")
+        love.graphics.setColor(0.3, 0.3, 0.35, 1)
+        love.graphics.rectangle("fill", px + 40, py + 330, 40, 40, 5, 5)      -- WP prev
+        love.graphics.rectangle("fill", px + pw - 80, py + 330, 40, 40, 5, 5) -- WP next
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.printf("<", px + 40, py + 335, 40, "center")
+        love.graphics.printf(">", px + pw - 80, py + 335, 40, "center")
+
+        love.graphics.setColor(0.8, 0.3, 0.3, 1)
+        love.graphics.rectangle("fill", px + pw / 2 - 75, py + 395, 150, 45, 8, 8)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.printf("Close", px + pw / 2 - 75, py + 395 + 10, 150, "center")
+    end
+
+    if gameOver or gameWon then
+        love.graphics.setColor(0, 0, 0, 0.85)
+        love.graphics.rectangle("fill", 0, 0, screenWidth, screenHeight)
+
+        if gameWon and youWinSprite then
+            love.graphics.setColor(1, 1, 1, 1)
+            local iw, ih = youWinSprite:getDimensions()
+            love.graphics.draw(youWinSprite, screenWidth / 2 - iw / 2, screenHeight / 2 - ih / 2 - 50)
+        elseif gameOver and gameOverSprite then
+            love.graphics.setColor(1, 1, 1, 1)
+            local iw, ih = gameOverSprite:getDimensions()
+            love.graphics.draw(gameOverSprite, screenWidth / 2 - iw / 2, screenHeight / 2 - ih / 2 - 50)
+        else
+            local function drawBulgingText(text, font, yCenter, minScale, maxScale)
+                love.graphics.setFont(font)
+                local totalW = 0
+                local chars = {}
+                local unscaledW = font:getWidth(text)
+                local currUnscaledX = -unscaledW / 2
+
+                for i = 1, #text do
+                    local char = text:sub(i, i)
+                    local charW = font:getWidth(char)
+                    local cx = currUnscaledX + charW / 2
+                    local normalized = cx / (unscaledW / 2)
+
+                    local bulge = 1 - (normalized * normalized)
+                    local charScale = minScale + (maxScale - minScale) * bulge
+
+                    table.insert(chars, {
+                        char = char,
+                        w = charW,
+                        scale = charScale
+                    })
+                    totalW = totalW + charW * charScale
+                    currUnscaledX = currUnscaledX + charW
+                end
+
+                local globalScale = 1.0
+                local maxAllowedW = screenWidth - 100
+                if totalW > maxAllowedW then
+                    globalScale = maxAllowedW / totalW
+                    totalW = totalW * globalScale
+                end
+
+                local currX = screenWidth / 2 - totalW / 2
+                local baseline = font:getBaseline()
+                local ascent = font:getAscent()
+                local visualCenterY = baseline - (ascent / 2)
+
+                for _, c in ipairs(chars) do
+                    local finalScale = c.scale * globalScale
+                    local scaledW = c.w * finalScale
+                    love.graphics.print(c.char, currX + scaledW / 2, yCenter, 0, finalScale, finalScale, c.w / 2,
+                        visualCenterY)
+                    currX = currX + scaledW
+                end
+            end
+
+            love.graphics.setColor(0.8, 0.1, 0.1, 1)
+            drawBulgingText(gameWon and "YOU WIN" or "GAME OVER", gothikSteelFont or largeFont, screenHeight / 2 - 80,
+                0.8, 1.3)
+        end
+
+        if not (gameWon and youWinSprite) then
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.setFont(oldLondonMedFont or mediumFont)
+            local yOffset = 80
+            if gameWon and youWinSprite then
+                yOffset = youWinSprite:getHeight() / 2 + 20
+            elseif gameOver and gameOverSprite then
+                yOffset = gameOverSprite:getHeight() / 2 + 20
+            end
+            love.graphics.printf("Click anywhere to restart", 0, screenHeight / 2 + yOffset, screenWidth, "center")
+        end
     end
 
     love.graphics.setCanvas()
@@ -776,13 +1261,72 @@ function love.draw()
     love.graphics.setShader(crtShader)
     love.graphics.draw(canvas, 0, 0)
     love.graphics.setShader()
+
+    if tvFrameSprite then
+        love.graphics.setColor(1, 1, 1, 1)
+        local fw, fh = tvFrameSprite:getDimensions()
+        love.graphics.draw(tvFrameSprite, 0, 0, 0, screenWidth / fw, screenHeight / fh)
+    end
 end
 
 function love.mousepressed(x, y, button, istouch, presses)
+    if gameOver or gameWon then
+        if button == 1 then
+            reset_match()
+        end
+        return
+    end
+
+    local function free_slot(card_to_free)
+        for _, slot in ipairs(slots) do
+            if slot.card == card_to_free then
+                slot.card = nil
+                break
+            end
+        end
+        if powerSlot.card == card_to_free then powerSlot.card = nil end
+        if weaponSlot.card == card_to_free then
+            weaponSlot.card = nil
+            for _, stacked_enemy in ipairs(weaponKills) do
+                stacked_enemy.is_stacked = false
+                stacked_enemy.is_discarded = true
+            end
+            weaponKills = {}
+        end
+    end
+
+    if button == 2 then
+        for i = #cards, 1, -1 do
+            local card = cards[i]
+            if not card.is_discarded and not card.is_on_deck and card.type ~= "enemy" then
+                if x > card.transform.x and x < card.transform.x + card.transform.width and
+                    y > card.transform.y and y < card.transform.y + card.transform.height then
+                    if card.is_dealt or card.is_slotted then
+                        local was_dealt = card.is_dealt
+                        card.is_slotted = false
+                        card.is_dealt = false
+                        card.is_selected = false
+                        card.is_discarded = true
+                        card.anim.punch = -0.3
+                        card.target_transform.x = btnTrash.x + btnTrash.width / 2 - card.transform.width / 2
+                        card.target_transform.y = btnTrash.y + btnTrash.height / 2 - card.transform.height / 2
+                        queue_sound(dealSounds, 0, 0.8)
+                        free_slot(card)
+                        if was_dealt then
+                            refill_session_if_needed()
+                        end
+                        return
+                    end
+                end
+            end
+        end
+        return
+    end
+
     if button ~= 1 then return end
 
     if showSettings then
-        local pw, ph = 400, 300
+        local pw, ph = 400, 460
         local px, py = screenWidth / 2 - pw / 2, screenHeight / 2 - ph / 2
 
         -- Difficulty buttons
@@ -796,8 +1340,42 @@ function love.mousepressed(x, y, button, istouch, presses)
             end
         end
 
+        -- SFX Volume
+        if x > px + 40 and x < px + 80 and y > py + 210 and y < py + 250 then
+            sfxVolume = math.max(0, sfxVolume - 0.1)
+            return
+        end
+        if x > px + pw - 80 and x < px + pw - 40 and y > py + 210 and y < py + 250 then
+            sfxVolume = math.min(1, sfxVolume + 0.1)
+            return
+        end
+
+        -- Music Volume
+        if x > px + 40 and x < px + 80 and y > py + 270 and y < py + 310 then
+            musicVolume = math.max(0, musicVolume - 0.1)
+            return
+        end
+        if x > px + pw - 80 and x < px + pw - 40 and y > py + 270 and y < py + 310 then
+            musicVolume = math.min(1, musicVolume + 0.1)
+            return
+        end
+
+        -- Wallpaper
+        if x > px + 40 and x < px + 80 and y > py + 330 and y < py + 370 then
+            currentWallpaperIndex = currentWallpaperIndex - 1
+            if currentWallpaperIndex < 1 then currentWallpaperIndex = #wallpapers end
+            if #wallpapers > 0 then bgSprite = wallpapers[currentWallpaperIndex] end
+            return
+        end
+        if x > px + pw - 80 and x < px + pw - 40 and y > py + 330 and y < py + 370 then
+            currentWallpaperIndex = currentWallpaperIndex + 1
+            if currentWallpaperIndex > #wallpapers then currentWallpaperIndex = 1 end
+            if #wallpapers > 0 then bgSprite = wallpapers[currentWallpaperIndex] end
+            return
+        end
+
         -- Close button or outside click
-        local cx, cy, cw, ch = px + pw / 2 - 60, py + 230, 120, 40
+        local cx, cy, cw, ch = px + pw / 2 - 75, py + 395, 150, 45
         if x > cx and x < cx + cw and y > cy and y < cy + ch then
             showSettings = false
             return
@@ -825,7 +1403,7 @@ function love.mousepressed(x, y, button, istouch, presses)
                 enemyPopup = nil
                 refill_session_if_needed()
             else
-                queue_sound(cardSound, 0, 0.5)
+                queue_sound(dealSounds, 0, 0.5)
             end
         elseif x > p.x and x < p.x + p.w and y > p.y and y < p.y + p.h then
             -- Click inside the popup but not on a button: ignore
@@ -847,7 +1425,7 @@ function love.mousepressed(x, y, button, istouch, presses)
                 card.anim.punch = -0.3
                 card.target_transform.x = btnTrash.x + btnTrash.width / 2 - card.transform.width / 2
                 card.target_transform.y = btnTrash.y + btnTrash.height / 2 - card.transform.height / 2
-                queue_sound(cardSound, 0, 0.8)
+                queue_sound(dealSounds, 0, 0.8)
 
                 -- Free slot
                 for _, slot in ipairs(slots) do
@@ -865,22 +1443,11 @@ function love.mousepressed(x, y, button, istouch, presses)
         if discarded_something then return end
     end
 
-    -- Start button logic
-    if #get_dealt_cards() == 0 and x > btnStart.x and x < btnStart.x + btnStart.width and
-        y > btnStart.y and y < btnStart.y + btnStart.height then
-        local currentDealt = get_dealt_cards()
-
-        local cardsToDeal = 4 - #currentDealt
-        if cardsToDeal <= 0 then
-            return
-        end
-
-        if runCooldown > 0 then
-            runCooldown = runCooldown - 1
-        end
-
-        healedThisTurn = false
-        deal_new_cards(cardsToDeal)
+    -- Skip video on click
+    if videoPlaying then
+        if startVideo then startVideo:pause() end
+        videoPlaying = false
+        deal_new_cards(4)
         return
     end
 
@@ -892,17 +1459,12 @@ function love.mousepressed(x, y, button, istouch, presses)
     end
 
     -- Run button logic
-    if x > btnRun.x and x < btnRun.x + btnRun.width and
+    if canUseFish and x > btnRun.x and x < btnRun.x + btnRun.width and
         y > btnRun.y and y < btnRun.y + btnRun.height then
-        if runCooldown > 0 then
-            queue_sound(cardSound, 0, 0.5)
-            return
-        end
-
         local count = 1
         for _, card in ipairs(cards) do
             if card.is_dealt then
-                queue_sound(cardSound, count * 0.05, 1 + count * 0.2)
+                queue_sound(dealSounds, count * 0.05, 1 + count * 0.2)
                 count = count + 1
                 card.is_on_deck = true
                 card.is_dealt = false
@@ -916,8 +1478,9 @@ function love.mousepressed(x, y, button, istouch, presses)
             deck.cards[i], deck.cards[j] = deck.cards[j], deck.cards[i]
         end
 
-        runCooldown = 2
         healedThisTurn = false
+        canUseFish = false
+        deal_new_cards(4)
         return
     end
 
@@ -934,13 +1497,12 @@ function love.mousepressed(x, y, button, istouch, presses)
         if selected_weapon then
             if selected_weapon == weaponSlot.card then
                 selected_weapon.is_selected = false
-                queue_sound(cardSound, 0, 1)
+                queue_sound(dealSounds, 0, 1)
             else
-                for _, stacked_enemy in ipairs(weaponKills) do
-                    stacked_enemy.is_stacked = false
-                    stacked_enemy.is_discarded = true
+                if #weaponKills > 0 then
+                    queue_sound(dealSounds, 0, 0.5)
+                    return
                 end
-                weaponKills = {}
 
                 local old_weapon = weaponSlot.card
                 if selected_weapon.is_slotted then
@@ -964,7 +1526,7 @@ function love.mousepressed(x, y, button, istouch, presses)
                         selected_weapon.target_transform.x = weaponSlot.x
                         selected_weapon.target_transform.y = weaponSlot.y
                         selected_weapon.is_selected = false
-                        queue_sound(cardSound, 0, 1)
+                        queue_sound(dealSounds, 0, 1)
                         return
                     end
                 elseif selected_weapon.is_dealt then
@@ -981,7 +1543,7 @@ function love.mousepressed(x, y, button, istouch, presses)
                     selected_weapon.target_transform.x = weaponSlot.x
                     selected_weapon.target_transform.y = weaponSlot.y
                     selected_weapon.is_selected = false
-                    queue_sound(cardSound, 0, 1)
+                    queue_sound(dealSounds, 0, 1)
                     refill_session_if_needed()
                     return
                 end
@@ -1020,7 +1582,14 @@ function love.mousepressed(x, y, button, istouch, presses)
                 end
             end
             if powerSlot.card == card_to_free then powerSlot.card = nil end
-            if weaponSlot.card == card_to_free then weaponSlot.card = nil end
+            if weaponSlot.card == card_to_free then
+                weaponSlot.card = nil
+                for _, stacked_enemy in ipairs(weaponKills) do
+                    stacked_enemy.is_stacked = false
+                    stacked_enemy.is_discarded = true
+                end
+                weaponKills = {}
+            end
         end
 
         -- Try interactions first
@@ -1037,11 +1606,10 @@ function love.mousepressed(x, y, button, istouch, presses)
                     local moving_in = selected_in_weapon_slot and clicked_card or selected_card
                     local moving_out = weaponSlot.card
                     if moving_out and moving_in ~= moving_out then
-                        for _, stacked_enemy in ipairs(weaponKills) do
-                            stacked_enemy.is_stacked = false
-                            stacked_enemy.is_discarded = true
+                        if #weaponKills > 0 then
+                            queue_sound(dealSounds, 0, 0.5)
+                            return
                         end
-                        weaponKills = {}
 
                         generic_slot.card = moving_out
                         moving_out.target_transform.x = generic_slot.x
@@ -1053,7 +1621,7 @@ function love.mousepressed(x, y, button, istouch, presses)
 
                         moving_in.is_selected = false
                         moving_out.is_selected = false
-                        queue_sound(cardSound, 0, 1)
+                        queue_sound(dealSounds, 0, 1)
 
                         for i, c in ipairs(cards) do
                             if c == moving_in then
@@ -1065,14 +1633,56 @@ function love.mousepressed(x, y, button, istouch, presses)
                         return
                     end
                 end
-            elseif selected_card.type == "power" and selected_card.power_type == "double" and clicked_card.is_slotted and clicked_card.type == selected_card.power_target then
-                clicked_card.power_mult = (clicked_card.power_mult or 0) + 2
+            elseif selected_card.type == "power" and selected_card.power_type == "double" and (clicked_card.is_slotted or clicked_card.is_dealt) and clicked_card.type == selected_card.power_target then
+                local pAmt = selected_card.power_amount or 1
+                clicked_card.power_mult = (clicked_card.power_mult or 0) + pAmt
+                clicked_card.value = clicked_card.value * (2 ^ pAmt)
                 clicked_card.anim.punch = 0.4
                 selected_card.is_discarded = true
                 selected_card.is_slotted = false
                 selected_card.is_selected = false
                 free_slot(selected_card)
-                queue_sound(cardSound, 0, 1.5)
+                queue_sound(dealSounds, 0, 1.5)
+                return
+            elseif selected_card.type == "power" and selected_card.power_type == "add" and (clicked_card.is_slotted or clicked_card.is_dealt) and clicked_card.type == selected_card.power_target then
+                local pAmt = selected_card.power_amount or 2
+                clicked_card.added_value = (clicked_card.added_value or 0) + pAmt
+                clicked_card.value = clicked_card.value + pAmt
+                clicked_card.anim.punch = 0.4
+                selected_card.is_discarded = true
+                selected_card.is_slotted = false
+                selected_card.is_selected = false
+                free_slot(selected_card)
+                queue_sound(dealSounds, 0, 1.5)
+                return
+            elseif selected_card.type == "item" and selected_card.item_type == "kill" and (clicked_card.is_slotted or clicked_card.is_dealt) and clicked_card.type == "enemy" then
+                clicked_card.is_discarded = true
+                clicked_card.is_dealt = false
+                clicked_card.anim.punch = -0.4
+                selected_card.is_discarded = true
+                selected_card.is_slotted = false
+                selected_card.is_selected = false
+                free_slot(selected_card)
+                queue_sound(impactSounds, 0, 1.5)
+                refill_session_if_needed()
+                return
+            elseif selected_card.type == "item" and selected_card.item_type == "poison" and (clicked_card.is_slotted or clicked_card.is_dealt) and clicked_card.type == "enemy" then
+                clicked_card.value = math.ceil(clicked_card.value / 2)
+                clicked_card.anim.punch = 0.4
+                selected_card.is_discarded = true
+                selected_card.is_slotted = false
+                selected_card.is_selected = false
+                free_slot(selected_card)
+                queue_sound(dealSounds, 0, 1.5)
+                return
+            elseif selected_card.type == "shield" and selected_card.shield_target == "weapon" and clicked_card == weaponSlot.card then
+                clicked_card.weapon_shield = (clicked_card.weapon_shield or 0) + 10
+                clicked_card.anim.punch = 0.4
+                selected_card.is_discarded = true
+                selected_card.is_slotted = false
+                selected_card.is_selected = false
+                free_slot(selected_card)
+                queue_sound(dealSounds, 0, 1.5)
                 return
             end
         end
@@ -1086,7 +1696,7 @@ function love.mousepressed(x, y, button, istouch, presses)
                     kill_enemy_with_fists(clicked_card)
                     refill_session_if_needed()
                 end
-            elseif clicked_card.type == "power" then
+            elseif clicked_card.type == "power" or clicked_card.type == "item" or clicked_card.type == "shield" then
                 if not powerSlot.card then
                     powerSlot.card = clicked_card
                     clicked_card.is_dealt = false
@@ -1094,8 +1704,39 @@ function love.mousepressed(x, y, button, istouch, presses)
                     clicked_card.anim.punch = 0.3
                     clicked_card.target_transform.x = powerSlot.x
                     clicked_card.target_transform.y = powerSlot.y
-                    queue_sound(cardSound, 0, 1)
+                    queue_sound(dealSounds, 0, 1)
                     refill_session_if_needed()
+                else
+                    local equipped = false
+                    for _, slot in ipairs(slots) do
+                        if not slot.card then
+                            slot.card = clicked_card
+                            clicked_card.is_dealt = false
+                            clicked_card.is_slotted = true
+                            clicked_card.anim.punch = 0.3
+                            clicked_card.target_transform.x = slot.x
+                            clicked_card.target_transform.y = slot.y
+                            queue_sound(dealSounds, 0, 1)
+                            refill_session_if_needed()
+                            equipped = true
+                            break
+                        end
+                    end
+                    if not equipped then
+                        if clicked_card.type == "shield" and clicked_card.shield_target == "health" then
+                            playerShield = playerShield + 10
+                            clicked_card.is_dealt = false
+                            clicked_card.is_discarded = true
+                            queue_sound(dealSounds, 0, 1.5)
+                            refill_session_if_needed()
+                        else
+                            local was_selected = clicked_card.is_selected
+                            for _, c in ipairs(cards) do c.is_selected = false end
+                            clicked_card.is_selected = not was_selected
+                            clicked_card.anim.punch = 0.15
+                            queue_sound(dealSounds, 0, 1.2)
+                        end
+                    end
                 end
             elseif clicked_card.type == "weapon" or clicked_card.type == "potion" then
                 if clicked_card.type == "weapon" and not weaponSlot.card then
@@ -1105,7 +1746,7 @@ function love.mousepressed(x, y, button, istouch, presses)
                     clicked_card.anim.punch = 0.3
                     clicked_card.target_transform.x = weaponSlot.x
                     clicked_card.target_transform.y = weaponSlot.y
-                    queue_sound(cardSound, 0, 1)
+                    queue_sound(dealSounds, 0, 1)
                     refill_session_if_needed()
 
                     for i, c in ipairs(cards) do
@@ -1125,39 +1766,58 @@ function love.mousepressed(x, y, button, istouch, presses)
                             clicked_card.anim.punch = 0.3
                             clicked_card.target_transform.x = slot.x
                             clicked_card.target_transform.y = slot.y
-                            queue_sound(cardSound, 0, 1)
+                            queue_sound(dealSounds, 0, 1)
                             refill_session_if_needed()
                             equipped = true
                             break
                         end
                     end
-                    if not equipped and clicked_card.type == "weapon" and weaponSlot.card then
-                        local was_selected = clicked_card.is_selected
-                        for _, c in ipairs(cards) do c.is_selected = false end
-                        clicked_card.is_selected = not was_selected
-                        clicked_card.anim.punch = 0.15
-                        queue_sound(cardSound, 0, 1.2)
+                    if not equipped then
+                        if clicked_card.type == "potion" then
+                            if healedThisTurn then
+                                queue_sound(dealSounds, 0, 0.5)
+                            else
+                                playerHP = math.min(maxHP, playerHP + effective_value(clicked_card))
+                                clicked_card.is_dealt = false
+                                clicked_card.is_discarded = true
+                                queue_sound(dealSounds, 0, 1.5)
+                                healedThisTurn = true
+                                refill_session_if_needed()
+                            end
+                        else
+                            local was_selected = clicked_card.is_selected
+                            for _, c in ipairs(cards) do c.is_selected = false end
+                            clicked_card.is_selected = not was_selected
+                            clicked_card.anim.punch = 0.15
+                            queue_sound(dealSounds, 0, 1.2)
+                        end
                     end
                 end
             end
         elseif clicked_card.is_slotted then
             if clicked_card.type == "potion" then
                 if healedThisTurn then
-                    queue_sound(cardSound, 0, 0.5)
+                    queue_sound(dealSounds, 0, 0.5)
                 else
                     playerHP = math.min(maxHP, playerHP + effective_value(clicked_card))
                     clicked_card.is_slotted = false
                     clicked_card.is_discarded = true
                     free_slot(clicked_card)
-                    queue_sound(cardSound, 0, 1.5)
+                    queue_sound(dealSounds, 0, 1.5)
                     healedThisTurn = true
                 end
+            elseif clicked_card.type == "shield" and clicked_card.shield_target == "health" then
+                playerShield = playerShield + 10
+                clicked_card.is_slotted = false
+                clicked_card.is_discarded = true
+                free_slot(clicked_card)
+                queue_sound(dealSounds, 0, 1.5)
             else
                 local was_selected = clicked_card.is_selected
                 for _, c in ipairs(cards) do c.is_selected = false end
                 clicked_card.is_selected = not was_selected
                 clicked_card.anim.punch = 0.15
-                queue_sound(cardSound, 0, 1.2)
+                queue_sound(dealSounds, 0, 1.2)
             end
         end
         return
@@ -1177,6 +1837,19 @@ function love.mousepressed(x, y, button, istouch, presses)
 end
 
 function love.update(delta_time)
+    if videoFailed then
+        videoFailed = false
+        deal_new_cards(4)
+    end
+
+    if videoPlaying and startVideo then
+        if not startVideo:isPlaying() then
+            videoPlaying = false
+            deal_new_cards(4)
+        end
+        return
+    end
+
     local mx, my = love.mouse.getPosition()
     local time = love.timer.getTime()
     for _, card in ipairs(cards) do
@@ -1261,7 +1934,9 @@ function love.mousereleased()
     local mx, my = love.mouse.getPosition()
     for position, card in ipairs(deck.cards) do
         if card.dragging == true then
-            love.audio.play(cardSound)
+            local dropSnd = dealSounds[math.random(#dealSounds)]
+            dropSnd:setVolume(sfxVolume)
+            love.audio.play(dropSnd)
             card.dragging = false
 
             if mx > btnTrash.x and mx < btnTrash.x + btnTrash.width and
