@@ -100,6 +100,7 @@ local cardTypes = {
 
 local playerHP = 20
 local maxHP = 20
+local healedThisTurn = false
 
 local slots = {}
 local powerSlot = {}
@@ -146,6 +147,7 @@ local function new_card(color, cardType, suit_idx, rank)
         value = cardValues[cardType],
         power_type = nil,
         power_mult = nil,
+        power_target = nil,
         suit_idx = suit_idx,
         rank = rank,
         last_killed_value = nil,
@@ -443,17 +445,19 @@ function love.load()
             local cardType
             local color
             local powerType = nil
+            local powerTarget = nil
             if suit == "Spades" or suit == "Clubs" then
                 cardType = "enemy"
                 color = cardColors[4] -- Black
             elseif rank >= 11 and rank <= 13 then
                 cardType = "power"
+                powerType = "double"
                 if suit == "Diamonds" then
-                    color = cardColors[2] -- Yellow (2x power)
-                    powerType = "double"
+                    color = cardColors[2] -- Yellow (multiply weapons)
+                    powerTarget = "weapon"
                 else
-                    color = cardColors[3] -- Red (heal power)
-                    powerType = "heal"
+                    color = cardColors[3] -- Red (multiply potions)
+                    powerTarget = "potion"
                 end
             elseif suit == "Hearts" then
                 cardType = "potion"
@@ -466,6 +470,7 @@ function love.load()
             local card = new_card(color, cardType, suitToRow[suit], rank)
             card.value = rank
             card.power_type = powerType
+            card.power_target = powerTarget
             table.insert(deckBuilder, card)
         end
     end
@@ -622,9 +627,6 @@ function love.draw()
                 love.graphics.setFont(mediumFont)
                 if card.type == "power" then
                     local label = "x2"
-                    if card.power_type == "heal" then
-                        label = "+" .. tostring(card.value)
-                    end
                     love.graphics.printf(label, -63, -16, 126, "center")
                     love.graphics.setFont(defaultFont)
                     love.graphics.printf(label, -55, -82, 126, "left")
@@ -877,6 +879,7 @@ function love.mousepressed(x, y, button, istouch, presses)
             runCooldown = runCooldown - 1
         end
 
+        healedThisTurn = false
         deal_new_cards(cardsToDeal)
         return
     end
@@ -914,6 +917,7 @@ function love.mousepressed(x, y, button, istouch, presses)
         end
 
         runCooldown = 2
+        healedThisTurn = false
         return
     end
 
@@ -1061,7 +1065,7 @@ function love.mousepressed(x, y, button, istouch, presses)
                         return
                     end
                 end
-            elseif selected_card.type == "power" and selected_card.power_type == "double" and clicked_card.is_slotted and (clicked_card.type == "weapon" or clicked_card.type == "potion") then
+            elseif selected_card.type == "power" and selected_card.power_type == "double" and clicked_card.is_slotted and clicked_card.type == selected_card.power_target then
                 clicked_card.power_mult = (clicked_card.power_mult or 0) + 2
                 clicked_card.anim.punch = 0.4
                 selected_card.is_discarded = true
@@ -1138,17 +1142,16 @@ function love.mousepressed(x, y, button, istouch, presses)
             end
         elseif clicked_card.is_slotted then
             if clicked_card.type == "potion" then
-                playerHP = math.min(maxHP, playerHP + effective_value(clicked_card))
-                clicked_card.is_slotted = false
-                clicked_card.is_discarded = true
-                free_slot(clicked_card)
-                queue_sound(cardSound, 0, 1.5)
-            elseif clicked_card.type == "power" and clicked_card.power_type == "heal" then
-                playerHP = math.min(maxHP, playerHP + clicked_card.value)
-                clicked_card.is_slotted = false
-                clicked_card.is_discarded = true
-                free_slot(clicked_card)
-                queue_sound(cardSound, 0, 1.5)
+                if healedThisTurn then
+                    queue_sound(cardSound, 0, 0.5)
+                else
+                    playerHP = math.min(maxHP, playerHP + effective_value(clicked_card))
+                    clicked_card.is_slotted = false
+                    clicked_card.is_discarded = true
+                    free_slot(clicked_card)
+                    queue_sound(cardSound, 0, 1.5)
+                    healedThisTurn = true
+                end
             else
                 local was_selected = clicked_card.is_selected
                 for _, c in ipairs(cards) do c.is_selected = false end
