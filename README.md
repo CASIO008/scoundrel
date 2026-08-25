@@ -1,6 +1,6 @@
 # Privy
 
-<img width="801" height="602" alt="game" src="https://github.com/user-attachments/assets/098536a6-8fc0-48dd-91e4-d2414481c524" />
+<img width="798" height="596" alt="image" src="https://github.com/user-attachments/assets/bd9283d2-caf9-44c5-856a-e6408355e48b" />
 
 ## Sobre o Jogo
 Privy é um jogo de cartas de sobrevivência (roguelike), com mecânicas diretamente inspiradas no aclamado minigame **Scoundrel**. O objetivo principal é sobreviver à travessia por uma masmorra implacável (representada por um baralho de cartas padrão), gerenciando cuidadosamente seus pontos de vida, enfrentando monstros e coletando recursos. O jogo traz uma estética retrô marcante, com pixel art e um filtro visual imitando monitores CRT (televisão de tubo).
