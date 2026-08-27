@@ -260,7 +260,8 @@ local function deal_new_cards(count)
         card.anim.punch = 0.2
         card.target_transform.x = startX + (#currentDealt + dealtCount) * (cardWidth + spacing)
         card.target_transform.y = dealY
-        table.remove(deck.cards, position)
+        if card.type == "enemy" and card.value >= 10 and sndKillCard then sndKillCard:play() end
+                        table.remove(deck.cards, position)
         dealtCount = dealtCount + 1
         position = #deck.cards
     end
@@ -271,6 +272,7 @@ local function refill_session_if_needed()
 
     if dealtCount == 0 and #deck.cards == 0 then
         gameWon = true
+                if sndYouWin then sndYouWin:play() end
         return
     end
 
@@ -381,6 +383,7 @@ local function take_damage(amount)
         playerHP = math.max(0, playerHP - amount)
         if playerHP <= 0 then
             gameOver = true
+        if sndGameOver then sndGameOver:play() end
         end
     end
 end
@@ -2020,6 +2023,7 @@ function love.mousepressed(x, y, button, istouch, presses)
                                 queue_sound(dealSounds, 0, 0.5)
                             else
                                 playerHP = math.min(maxHP, playerHP + effective_value(clicked_card))
+                                if sndHealing then sndHealing:play() end
                                 clicked_card.is_dealt = false
                                 canUseFish = false
                                 clicked_card.is_discarded = true
@@ -2043,6 +2047,7 @@ function love.mousepressed(x, y, button, istouch, presses)
                     queue_sound(dealSounds, 0, 0.5)
                 else
                     playerHP = math.min(maxHP, playerHP + effective_value(clicked_card))
+                    if sndHealing then sndHealing:play() end
                     clicked_card.is_slotted = false
                     clicked_card.is_discarded = true
                     free_slot(clicked_card)
@@ -2084,9 +2089,11 @@ function love.keypressed(key)
         if key == "up" or key == "w" then
             menuSelection = menuSelection - 1
             if menuSelection < 1 then menuSelection = 6 end
+            if sndOptions then sndOptions:play() end
         elseif key == "down" or key == "s" then
             menuSelection = menuSelection + 1
             if menuSelection > 6 then menuSelection = 1 end
+            if sndOptions then sndOptions:play() end
         elseif key == "right" or key == "d" then
             if menuSelection == 2 then
                 if currentDifficulty == "Easy" then
@@ -2098,8 +2105,10 @@ function love.keypressed(key)
                 end
             elseif menuSelection == 3 then
                 sfxVolume = math.min(1.0, sfxVolume + 0.1)
+                if sndVolume then sndVolume:play() end
             elseif menuSelection == 4 then
                 musicVolume = math.min(1.0, musicVolume + 0.1)
+                if sndVolume then sndVolume:play() end
             elseif menuSelection == 5 then
                 currentWallpaperIndex = currentWallpaperIndex + 1
                 if currentWallpaperIndex > #wallpapers then currentWallpaperIndex = 1 end
@@ -2119,8 +2128,10 @@ function love.keypressed(key)
                 end
             elseif menuSelection == 3 then
                 sfxVolume = math.max(0.0, sfxVolume - 0.1)
+                if sndVolume then sndVolume:play() end
             elseif menuSelection == 4 then
                 musicVolume = math.max(0.0, musicVolume - 0.1)
+                if sndVolume then sndVolume:play() end
             elseif menuSelection == 5 then
                 currentWallpaperIndex = currentWallpaperIndex - 1
                 if currentWallpaperIndex < 1 then currentWallpaperIndex = #wallpapers end
@@ -2258,7 +2269,8 @@ function love.mousereleased()
                 card.target_transform.x = btnTrash.x + btnTrash.width / 2 - card.transform.width / 2
                 card.target_transform.y = btnTrash.y + btnTrash.height / 2 - card.transform.height / 2
                 card.anim.punch = -0.2
-                table.remove(deck.cards, position)
+                if card.type == "enemy" and card.value >= 10 and sndKillCard then sndKillCard:play() end
+                        table.remove(deck.cards, position)
             end
             break
         end
