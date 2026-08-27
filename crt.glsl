@@ -25,9 +25,9 @@ vec4 effect( vec4 color, Image tex, vec2 texture_coords, vec2 screen_coords )
     col.r = Texel(tex,vec2(x+uv.x+0.001,uv.y+0.001)).x+0.05;
     col.g = Texel(tex,vec2(x+uv.x+0.000,uv.y-0.002)).y+0.05;
     col.b = Texel(tex,vec2(x+uv.x-0.002,uv.y+0.000)).z+0.05;
-    col.r += 0.08*Texel(tex,0.75*vec2(x+0.025, -0.027)+vec2(uv.x+0.001,uv.y+0.001)).x;
-    col.g += 0.05*Texel(tex,0.75*vec2(x+-0.022, -0.02)+vec2(uv.x+0.000,uv.y-0.002)).y;
-    col.b += 0.08*Texel(tex,0.75*vec2(x+-0.02, -0.018)+vec2(uv.x-0.002,uv.y+0.000)).z;
+    col.r += 0.16*Texel(tex,0.75*vec2(x+0.025, -0.027)+vec2(uv.x+0.001,uv.y+0.001)).x;
+    col.g += 0.10*Texel(tex,0.75*vec2(x+-0.022, -0.02)+vec2(uv.x+0.000,uv.y-0.002)).y;
+    col.b += 0.16*Texel(tex,0.75*vec2(x+-0.02, -0.018)+vec2(uv.x-0.002,uv.y+0.000)).z;
 
     col = clamp(col*0.6+0.4*col*col*1.0,0.0,1.0);
 
