@@ -1,0 +1,7 @@
+- [ ] Criar dicionário de tradução `i18n` em `main.lua`.
+- [ ] Adicionar suporte a idioma na estrutura de salvamento (`privy_save.lua`).
+- [ ] Modificar função de carregamento de fontes para recarregar com base no idioma (usando YaHei para chinês).
+- [ ] Atualizar opções do menu: adicionar seletor de idioma, mover opções.
+- [ ] Modificar controles de teclado para o menu (`menuSelection` vai até 7, navegação horizontal muda o idioma).
+- [ ] Substituir todas as strings hardcoded pela busca no dicionário `i18n`.
+- [ ] Validar o código.

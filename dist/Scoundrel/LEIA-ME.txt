@@ -1,0 +1,17 @@
+SCOUNDREL
+=========
+
+Como jogar
+----------
+1. Extraia esta pasta do .zip (clique com o botao direito em "Extrair tudo").
+2. Abra a pasta extraida e execute "scoundrel.exe".
+3. Pronto! Nao precisa instalar nada.
+
+IMPORTANTE
+----------
+- NAO mova, renomeie nem apague os arquivos .dll desta pasta:
+  eles sao necessarios para o jogo funcionar.
+- Se o Windows SmartScreen pedir confirmacao, clique em "Mais informacoes"
+  e depois em "Executar assim mesmo".
+
+Requisitos: Windows 7 ou superior (64 bits).

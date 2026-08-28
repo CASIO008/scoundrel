@@ -1,11 +1,11 @@
-# Privy
+# Scoundrel
 
 <img width="798" height="596" alt="image" src="https://github.com/user-attachments/assets/bd9283d2-caf9-44c5-856a-e6408355e48b" />
 
 ## Sobre o Jogo
-Privy é um jogo de cartas de sobrevivência (roguelike), com mecânicas diretamente inspiradas no aclamado minigame **Scoundrel**. O objetivo principal é sobreviver à travessia por uma masmorra implacável (representada por um baralho de cartas padrão), gerenciando cuidadosamente seus pontos de vida, enfrentando monstros e coletando recursos. O jogo traz uma estética retrô marcante, com pixel art e um filtro visual imitando monitores CRT (televisão de tubo).
+Scoundrel é um jogo de cartas de sobrevivência (roguelike). O objetivo principal é sobreviver à travessia por uma masmorra implacável (representada por um baralho de cartas padrão), gerenciando cuidadosamente seus pontos de vida, enfrentando monstros e coletando recursos. O jogo traz uma estética retrô marcante, com pixel art e um filtro visual imitando monitores CRT (televisão de tubo).
 
-## Como Jogar (Estilo Scoundrel)
+## Como Jogar
 Você começa a partida com **20 pontos de vida**, como exibido em destaque no topo da tela. 
 
 Os naipes das cartas ditam o que elas representam na sua jornada:
@@ -20,5 +20,6 @@ A cada turno, você se depara com uma sala contendo até 4 cartas (como na image
 
 Este jogo foi desenvolvido com base no esforço incrível da comunidade open-source e de artistas independentes. Os direitos autorais dos ativos de terceiros pertencem aos seus respectivos criadores:
 
+*   **Design Original:** O design original do Scoundrel foi criado por **Zach Gage** e **Kurt Bieg**.
 *   **Código Base:** A arquitetura inicial e o código base deste projeto foram originalmente desenvolvidos por **tom-delalande** (referente ao repositório base em Love2D).
-*   **Artes das Cartas:** O design e os sprites das cartas de baralho pertencem ao pacote **"Pixel Card Decks"**, magistralmente criado por **opersze**.# privy
+*   **Artes das Cartas:** O design e os sprites das cartas de baralho pertencem ao pacote **"Pixel Card Decks"**, magistralmente criado por **opersze**.
